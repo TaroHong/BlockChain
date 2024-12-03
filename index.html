@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>블록체인 모니터링</title>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f2f3f8; /* 배경색 변경 */
+            margin: 0;
+            padding: 20px;
+        }
+        h1 {
+            text-align: left; /* 제목을 왼쪽으로 정렬 */
+            color: #333; /* 제목 색상을 어두운 색으로 변경 */
+            margin-bottom: 10px;
+            padding: 10px; /* 패딩 추가 */
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+            border-radius: 8px; /* 둥근 모서리 */
+            overflow: hidden; /* 둥근 모서리 효과 적용 */
+        }
+        th, td {
+            padding: 12px;
+            text-align: center; /* 가운데 정렬 */
+            border-bottom: 1px solid #ddd;
+            color: #333; /* 글자 색상 어두운 색으로 변경 */
+            word-wrap: break-word; /* 긴 단어 줄 바꿈 */
+        }
+        th {
+            background-color: #ffffff; /* 흰색으로 변경 */
+            color: #333; /* 글자 색상 어두운 색으로 변경 */
+        }
+        tr:nth-child(even) {
+            background-color: #f9f9f9; /* 짝수 행 연한 회색 배경 */
+        }
+        tr:nth-child(odd) {
+            background-color: #ffffff; /* 홀수 행 흰색 배경 */
+        }
+        tr:hover {
+            background-color: #f1f1f1;
+        }
+        /* 모달 스타일 */
+        .modal {
+            display: none; /* 기본적으로 숨김 */
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            overflow: auto;
+            background-color: rgba(0, 0, 0, 0.7); /* 반투명 배경 */
+            justify-content: center;
+            align-items: center;
+        }
+        .modal-content {
+            background-color: #fff;
+            margin: 15% auto;
+            padding: 20px;
+            border: 1px solid #888;
+            width: 80%; /* 모달 너비 */
+            max-width: 600px; /* 최대 너비 */
+            border-radius: 8px; /* 둥글은 모서리 */
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2); /* 그림자 효과 */
+        }
+        .modal-content img {
+            width: 100%; /* 이미지 반응형 */
+            height: auto; /* 비율 유지 */
+        }
+        .close {
+            color: #aaa;
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+        }
+        .close:hover,
+        .close:focus {
+            color: white;
+            text-decoration: none;
+            cursor: pointer;
+        }
+        footer {
+            text-align: center;
+            margin-top: 20px;
+            color: #666;
+        }
+
+        /* 반응형 테이블 스타일 */
+        @media (max-width: 600px) {
+            table, th, td {
+                display: block;
+                width: 100%;
+            }
+            th, td {
+                box-sizing: border-box;
+                text-align: left;
+                padding: 10px 5px; /* 패딩 조정 */
+            }
+            th {
+                background-color: #fff; /* 헤더 배경색 */
+            }
+        }
+    </style>
+</head>
+<body>
+    <h1>블록체인 모니터링</h1>
+    <table>
+        <thead>
+            <tr>
+                <th>Index</th>
+                <th>생성된 시간</th>
+                <th>데이터 해시값</th>
+                <th>이전 블록의 Hash값</th>
+                <th>블록 생성 시간 (ms)</th>
+            </tr>
+        </thead>
+        <tbody id="block-table-body">
+            <!-- 블록 데이터가 여기에 추가됩니다. -->
+        </tbody>
+    </table>
+
+    <!-- 모달 -->
+    <div class="modal" id="image-modal">
+        <div class="modal-content">
+            <span class="close" id="close-modal">&times;</span>
+            <h3>블록 이미지</h3>
+            <img id="block-image" src="" alt="Block Image">
+            <p id="modal-message" style="display: none; color: red;"></p>
+        </div>
+    </div>
+
+    <footer>
+        <p>&copy; 2024 LogiChain</p>
+    </footer>
+
+    <script>
+        $(document).ready(function() {
+            fetch('/blocks')
+                .then(response => response.json())
+                .then(data => {
+                    const tableBody = $('#block-table-body');
+                    data.forEach(block => {
+                        tableBody.append(`
+                            <tr>
+                                <td>${block.index}</td>
+                                <td>
+                                    <a href="#" class="timestamp" data-timestamp="${Math.floor(block.timestamp)}">
+                                        ${new Date(block.timestamp * 1000).toLocaleString()}
+                                    </a>
+                                </td>
+                                <td>${block.inputDataHash}</td>
+                                <td>${block.previousHash}</td>
+                                <td>${block.creationTime.toFixed(3)} ms</td>
+                            </tr>
+                        `);
+                    });
+
+                    // 타임스탬프 클릭 이벤트
+                    $('.timestamp').on('click', function(e) {
+                        e.preventDefault(); // 기본 링크 동작 방지
+                        const timestamp = $(this).data('timestamp');
+                        const blockIndex = $(this).closest('tr').find('td:first').text(); // 인덱스 가져오기
+
+                        if (blockIndex === '1') { // 첫 번째 블록(제네시스 블록)인지 확인
+                            $('#block-image').attr('src', ''); // 이미지 초기화
+                            $('#modal-message').text('제네시스 블록이라 이미지를 볼 수 없습니다.').show(); // 메시지 표시
+                        } else {
+                            const imagePath = `/blocks/${timestamp}/image_file.jpg`; // 정적 파일 경로
+                            $('#block-image').attr('src', imagePath);
+                            $('#modal-message').hide(); // 메시지 숨김
+                        }
+
+                        $('#image-modal').css('display', 'flex'); // 모달 표시
+                    });
+
+                    // 모달 닫기
+                    $('#close-modal').on('click', function() {
+                        $('#image-modal').css('display', 'none'); // 모달 숨기기
+                    });
+
+                    // 모달 외부 클릭 시 닫기
+                    $(window).on('click', function(event) {
+                        if ($(event.target).is('#image-modal')) {
+                            $('#image-modal').css('display', 'none'); // 모달 숨기기
+                        }
+                    });
+                });
+        });
+    </script>
+</body>
+</html>
