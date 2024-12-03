@@ -97,7 +97,9 @@ python3 app.py
 ```
 
 /blocks 안에는 블록에 대한 정보들(index,timestamp,inputDataHash,previousHash)가 들어있으며 jpg와 csv에 대한 파일도 같이 있습니다. block의 이름은 타임스탬프로 저장합니다.
+
 ![image](https://github.com/user-attachments/assets/1dd84585-a02e-4484-a1b6-e8ca5251476f)
+
 
 ## 🔮 향후 개선 사항
 
