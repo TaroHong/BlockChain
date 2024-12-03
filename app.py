@@ -200,4 +200,4 @@ if not blockchain_data:
     create_genesis_block()
 
 if __name__ == '__main__':
-    app.run(host='서버아이피', port='원하는포트')
+    app.run(host='서버아이피', port='원하는포트')  
