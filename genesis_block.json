@@ -4,13 +4,6 @@
         "timestamp": 0,
         "inputDataHash": "012345566666777",
         "previousHash": "02323424243242342323432",
-        "result": "Genesis Block"
-    },
-    {
-        "index": 2,
-        "timestamp": 1732169246.932748,
-        "inputDataHash": "b866a2c6a2cefac18c2969079cf52d0441cf56880a0b38b102b7b3ee45f73bf4",
-        "previousHash": "012345566666777",
-        "result": "0.03%"
+        "creationTime" : "0.0"
     }
 ]
