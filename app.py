@@ -3,201 +3,254 @@ import os
 import hashlib
 import json
 import shutil
-import time
+import re
 from time import time as current_time
+from threading import Thread
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler
 from web3 import Web3
-from flask import Flask, render_template, jsonify, request, send_from_directory
+from flask import Flask, jsonify, render_template
+from flask_cors import CORS
 
-# Flask 애플리케이션 설정
-app = Flask(__name__)
+# Flask 설정
+app = Flask(__name__, template_folder='/home/nos07054/outethblock/templates')
+CORS(app, resources={r"/*": {"origins": "*"}})
 
-# 설정
-BLOCKCHAIN_DIR = '/root/ethblock'
+# 경로 설정
+BLOCKCHAIN_DIR = '/home/nos07054/outethblock'
 UPLOAD_FOLDER = os.path.join(BLOCKCHAIN_DIR, 'blocks')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-# 블록체인 데이터 저장소
-blockchain_data = []
+IMAGE_DIR = '/home/nos07054/outethblock/images'
+CSV_DIR = '/home/nos07054/outethblock/csv_files'
 
-# 블록체인 데이터 파일 경로
-blockchain_data_file = os.path.join(BLOCKCHAIN_DIR, 'blockchain_data.json')
+# 처리된 파일 기록용 저장소
+processed_files_file = os.path.join(BLOCKCHAIN_DIR, 'processed_files.json')
+processed_files = set()
 
-# Geth 연결 설정
-infura_url = 'geth 네트워크 실행한곳의 도메인'  # Geth의 RPC URL
+# Geth 설정
+infura_url = 'geth 네트워크 아이피'
 w3 = Web3(Web3.HTTPProvider(infura_url))
 
-# Geth에 연결되었는지 확인
-if w3.is_connected:
-    print("Geth에 연결되었습니다.")
-    
-    accounts = w3.eth.accounts
-    if accounts:
-        client_addresses = accounts  # 사용 가능한 모든 계정을 사용
-        print(f"사용 가능한 계정: {client_addresses}")
-    else:
-        print("계정이 없습니다. 계정을 생성해 주세요.")
-else:
-    print("Geth에 연결할 수 없습니다.")
+blockchain_data = []
+blockchain_data_file = os.path.join(BLOCKCHAIN_DIR, 'blockchain_data.json')
 
-# 스마트 계약 주소와 ABI 설정
-contract_address = '실제 배포된 계약 주소값'  
-abi_file_path = 'abi 파일위치'
+contract_address = '컨트렉트 주소값'
+abi_file_path = '솔리디티로 만든 abi 데이터'
 
-# ABI 파일 읽기
-with open(abi_file_path, 'r') as abi_file:
-    contract_abi = json.load(abi_file)
+# ABI 로드
+try:
+    with open(abi_file_path, 'r') as abi_file:
+        contract_abi = json.load(abi_file)
+except FileNotFoundError:
+    print("[ERROR] ABI 파일을 찾을 수 없습니다. 경로를 확인하세요.")
+    exit()
 
 contract = w3.eth.contract(address=contract_address, abi=contract_abi)
 
+if w3.is_connected():
+    print("[LOG] Geth에 연결되었습니다.")
+    accounts = w3.eth.accounts
+    if accounts:
+        client_addresses = accounts
+        print(f"[LOG] 사용 가능한 계정: {client_addresses}")
+    else:
+        print("[WARNING] 계정이 없습니다. 계정을 생성하거나 가져오세요.")
+else:
+    print("[ERROR] Geth에 연결할 수 없습니다. Geth 노드 상태를 확인하세요.")
+    exit()
+
+# 블록체인 데이터 로드 및 저장
 def load_blockchain_data():
-    """블록체인 데이터를 JSON 파일에서 로드합니다."""
-    global blockchain_data
+    global blockchain_data, processed_files
     if os.path.exists(blockchain_data_file):
         with open(blockchain_data_file, 'r') as f:
             blockchain_data = json.load(f)
+        print(f"[DEBUG] 로드된 블록 데이터 개수: {len(blockchain_data)}개")
+    else:
+        print("[WARNING] 블록체인 데이터 파일이 존재하지 않습니다.")
+
+    if os.path.exists(processed_files_file):
+        with open(processed_files_file, 'r') as f:
+            processed_files = set(json.load(f))
+        print(f"[DEBUG] 로드된 처리된 파일 목록 개수: {len(processed_files)}개")
+    else:
+        print("[WARNING] 처리된 파일 목록이 존재하지 않습니다.")
 
 def save_blockchain_data():
-    """블록체인 데이터를 JSON 파일에 저장합니다."""
-    with open(blockchain_data_file, 'w') as f:
-        json.dump(blockchain_data, f, indent=4)
-
-def create_genesis_block():
-    """제네시스 블록을 생성합니다."""
-    genesis_block = {
-        'index': 1,
-        'timestamp': int(current_time()),  # 타임스탬프를 정수로 변환
-        'inputDataHash': '0',  # 제네시스 블록은 이전 해시가 없음
-        'previousHash': '0',  # 이전 해시 없음
-        'result': 'Genesis Block',
-        'creationTime': 0.0  # 제네시스 블록의 생성 시간
-    }
-    blockchain_data.append(genesis_block)
-    save_blockchain_data()  # 제네시스 블록을 파일에 저장
-    print("제네시스 블록이 생성되었습니다.")
-
-def generate_hash(file_path):
-    """주어진 파일의 SHA-256 해시를 생성합니다."""
-    with open(file_path, "rb") as f:
-        return hashlib.sha256(f.read()).hexdigest()
-
-def create_block_from_files(image_path, csv_path, result_path, client_address):
-    """파일로부터 블록을 생성합니다."""
-    start_time = current_time() * 1000  # 데이터 수신 시작 시간 기록 (밀리초)
-
-    image_hash = generate_hash(image_path)
-    csv_hash = generate_hash(csv_path)
-    result_hash = generate_hash(result_path)
-
-    # 모든 해시를 결합하여 하나의 문자열 생성
-    combined_hash_string = "{}|{}|{}".format(image_hash, csv_hash, result_hash)
-
-    # 결합된 해시 문자열에 대해 SHA-256 해시 생성
-    input_data_hash = hashlib.sha256(combined_hash_string.encode()).hexdigest()
-
-    previous_hash = blockchain_data[-1]['inputDataHash'] if blockchain_data else '0'
-
-    # 블록 생성
-    new_block = {
-        'index': len(blockchain_data) + 1,
-        'timestamp': int(current_time()),  # 타임스탬프를 정수로 변환
-        'inputDataHash': input_data_hash,
-        'previousHash': previous_hash,
-        'result': open(result_path).read().strip(),  # 결과 파일 내용
-        'creationTime': 0.0  # 초기화
-    }
-
-    # 블록 생성 후 현재 시간을 기록하여 creationTime 계산
-    end_time = current_time() * 1000  # 블록 생성 완료 시간 기록 (밀리초)
-    new_block['creationTime'] = round(end_time - start_time, 3)  # 데이터 수신부터 블록 생성까지 걸린 시간 (밀리초, 소수점 3자리)
-
-    # 블록 데이터를 블록체인 데이터에 추가
-    blockchain_data.append(new_block)
-
-    # 블록체인 전체 정보 저장
-    save_blockchain_data()
-
-    # 타임스탬프를 폴더 이름으로 하는 블록 저장
-    block_folder = os.path.join(UPLOAD_FOLDER, str(new_block['timestamp']))  # 정수로 변환된 타임스탬프 사용
-    os.makedirs(block_folder, exist_ok=True)
-
-    # JSON 파일로 블록 저장
-    with open(os.path.join(block_folder, 'block.json'), 'w') as f:
-        json.dump(new_block, f, indent=4)
-
-    # 파일 저장
-    shutil.copy(image_path, os.path.join(block_folder, 'image_file.jpg'))
-    shutil.copy(csv_path, os.path.join(block_folder, 'csv_file.csv'))
-    shutil.copy(result_path, os.path.join(block_folder, 'result_file.txt'))
-
-    # Geth에 블록 데이터 저장
-    gas_limit = 200000  # 고정된 가스 한도 설정
-
-    tx_hash = contract.functions.storeBlock(
-        int(new_block['index']),
-        new_block['timestamp'],  # 정수로 변환된 타임스탬프 사용
-        new_block['inputDataHash'],
-        new_block['previousHash'],
-        new_block['result']
-    ).transact({
-        'from': client_address,
-        'gas': gas_limit  # 고정된 가스 한도를 사용
-    })
-
-    print("블록이 생성되었습니다: {}, 트랜잭션 해시: {}".format(new_block, tx_hash.hex()))
-
-@app.route('/receive_files', methods=['POST'])
-def receive_files():
-    """CSV 및 이미지 파일을 수신합니다."""
     try:
-        csv_file = request.files.get('csv_file')
-        image_file = request.files.get('image_file')
-        result_file = request.files.get('result_file')
-
-        if not csv_file or not image_file or not result_file:
-            return jsonify({'error': 'CSV, 이미지 또는 결과 파일이 누락되었습니다.'}), 400
-
-        # 파일 저장 경로
-        csv_path = os.path.join(UPLOAD_FOLDER, 'received_ocr_output.csv')
-        image_path = os.path.join(UPLOAD_FOLDER, 'received_cropped_image.jpg')
-        result_path = os.path.join(UPLOAD_FOLDER, 'received_result.txt')
-
-        # 파일 저장
-        csv_file.save(csv_path)
-        image_file.save(image_path)
-        result_file.save(result_path)
-
-        # 블록 생성
-        for client_address in client_addresses:
-            create_block_from_files(image_path, csv_path, result_path, client_address)
-
-        return jsonify({'message': '파일이 성공적으로 수신되었습니다.'}), 200
-
+        with open(blockchain_data_file, 'w') as f:
+            json.dump(blockchain_data, f, indent=4)
+        print("[LOG] 블록체인 데이터 저장 완료.")
     except Exception as e:
-        print(f"파일 수신 중 오류 발생: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+        print(f"[ERROR] 블록체인 데이터 저장 중 오류 발생: {str(e)}")
 
+def save_processed_files():
+    try:
+        sorted_processed_files = sorted(
+            processed_files,
+            key=lambda x: int(re.search(r'\d+', x).group())
+        )
+        with open(processed_files_file, 'w') as f:
+            json.dump(sorted_processed_files, f, indent=4)
+        print("[LOG] 처리된 파일 목록 저장 완료 (정렬됨).")
+    except Exception as e:
+        print(f"[ERROR] 처리된 파일 목록 저장 중 오류 발생: {str(e)}")
+
+# 제네시스 블록 생성
+def create_genesis_block():
+    if not blockchain_data:
+        genesis_block = {
+            'index': 1,
+            'timestamp': int(current_time()),
+            'inputDataHash': '0',
+            'previousHash': '0',
+            'creationTime': 0.0
+        }
+        blockchain_data.append(genesis_block)
+        save_blockchain_data()
+        print("[LOG] 제네시스 블록이 생성되었습니다.")
+
+# 해시 생성
+def generate_hash(file_path):
+    try:
+        with open(file_path, "rb") as f:
+            return hashlib.sha256(f.read()).hexdigest()
+    except Exception as e:
+        print(f"[ERROR] 파일 해시 생성 중 오류 발생: {str(e)}")
+        return None
+
+def create_block(image_path, csv_path, client_address):
+    try:
+        file_key = f"{os.path.basename(image_path)}|{os.path.basename(csv_path)}"
+        if file_key in processed_files:
+            print(f"[SKIP] 이미 처리된 파일: {file_key}")
+            return
+
+        start_time = current_time() * 1000
+        image_hash = generate_hash(image_path)
+        csv_hash = generate_hash(csv_path)
+
+        combined_hash_string = f"{image_hash}|{csv_hash}"
+        input_data_hash = hashlib.sha256(combined_hash_string.encode()).hexdigest()
+        previous_hash = blockchain_data[-1]['inputDataHash'] if blockchain_data else '0'
+
+        new_block = {
+            'index': len(blockchain_data) + 1,
+            'timestamp': int(current_time()),
+            'inputDataHash': input_data_hash,
+            'previousHash': previous_hash,
+            'creationTime': 0.0
+        }
+
+        end_time = current_time() * 1000
+        new_block['creationTime'] = round(end_time - start_time, 3)
+        blockchain_data.append(new_block)
+        save_blockchain_data()
+
+        # 폴더 이름 생성 (중복 방지)
+        timestamp = str(new_block['timestamp'])
+        block_folder = os.path.join(UPLOAD_FOLDER, timestamp)
+        suffix = 1
+
+        while os.path.exists(block_folder):  # 중복된 폴더가 있으면 suffix 추가
+            block_folder = os.path.join(UPLOAD_FOLDER, f"{timestamp}-{suffix}")
+            suffix += 1
+
+        os.makedirs(block_folder, exist_ok=True)
+
+        with open(os.path.join(block_folder, 'block.json'), 'w') as f:
+            json.dump(new_block, f, indent=4)
+        shutil.copy(image_path, os.path.join(block_folder, 'image_file.jpg'))
+        shutil.copy(csv_path, os.path.join(block_folder, 'csv_file.csv'))
+
+        processed_files.add(file_key)
+        save_processed_files()
+
+        print(f"[LOG] 블록 생성 완료: {new_block}")
+    except Exception as e:
+        print(f"[ERROR] 블록 생성 중 오류 발생: {str(e)}")
+
+# 파일 변경 감지 핸들러
+class FileChangeHandler(FileSystemEventHandler):
+    def on_created(self, event):
+        if event.is_directory:
+            return
+        file_path = event.src_path
+        prefix = os.path.splitext(os.path.basename(file_path))[0].split('_')[0]
+
+        image_path = os.path.join(IMAGE_DIR, f"{prefix}_cropped_uv.jpg")
+        csv_path = os.path.join(CSV_DIR, f"{prefix}_metadata.csv")
+
+        if os.path.exists(image_path) and os.path.exists(csv_path):
+            print(f"[DEBUG] 파일 변경 감지: {image_path}, {csv_path}")
+            for client_address in client_addresses:
+                create_block(image_path, csv_path, client_address)
+
+# 초기 파일 처리
+def process_existing_files():
+    print("[LOG] 초기 파일 처리 시작...")
+    
+    # 이미지 파일과 CSV 파일 정렬
+    image_files = sorted([f for f in os.listdir(IMAGE_DIR) if f.endswith('_cropped_uv.jpg')])
+    csv_files = sorted([f for f in os.listdir(CSV_DIR) if f.endswith('_metadata.csv')])
+    
+    print(f"[LOG] 발견된 이미지 파일 개수: {len(image_files)}")
+    print(f"[LOG] 발견된 CSV 파일 개수: {len(csv_files)}")
+    
+    # 매칭된 파일 리스트 생성
+    matched_files = []
+    
+    for image_file in image_files:
+        image_prefix = os.path.splitext(image_file)[0].split('_')[0]  # 이미지 파일의 접두사 추출
+        csv_file = f"{image_prefix}_metadata.csv"  # 매칭될 CSV 파일 이름 생성
+        csv_path = os.path.join(CSV_DIR, csv_file)
+        
+        if os.path.exists(csv_path):
+            matched_files.append((image_file, csv_file))  # 매칭된 파일 저장
+
+    print(f"[LOG] 매칭된 파일 개수: {len(matched_files)}")
+    
+    # 매칭된 파일 순서대로 블록 생성
+    matched_files.sort(key=lambda x: int(re.search(r'\d+', x[0]).group()))  # 숫자 순 정렬
+    
+    for image_file, csv_file in matched_files:
+        image_path = os.path.join(IMAGE_DIR, image_file)
+        csv_path = os.path.join(CSV_DIR, csv_file)
+        file_key = f"{image_file}|{csv_file}"
+
+        if file_key in processed_files:
+            print(f"[SKIP] 이미 처리된 파일: {file_key}")
+            continue
+
+        print(f"[DEBUG] 블록 생성 시작: {image_path}, {csv_path}")
+        for client_address in client_addresses:
+            create_block(image_path, csv_path, client_address)
+
+        processed_files.add(file_key)
+
+    # 저장 처리
+    save_processed_files()
+    print(f"[LOG] 초기 파일 처리 완료. 총 처리된 파일 개수: {len(processed_files)}")
+
+# Flask 엔드포인트
 @app.route('/')
 def index():
-    """메인 페이지를 렌더링합니다."""
-    return render_template('index.html')
+    return render_template('monitor.html')
 
 @app.route('/blocks')
 def get_blocks():
-    """블록체인 데이터를 JSON 형식으로 반환합니다."""
     return jsonify(blockchain_data)
 
-@app.route('/blocks/<int:timestamp>/image_file.jpg')
-def serve_image(timestamp):
-    """타임스탬프에 해당하는 이미지 파일을 제공합니다."""
-    block_folder = os.path.join(UPLOAD_FOLDER, str(timestamp))
-    return send_from_directory(block_folder, 'image_file.jpg')
-
-# 블록체인 데이터 로드
-load_blockchain_data()
-
-# 제네시스 블록이 없으면 생성
-if not blockchain_data:
+# 메인
+if __name__ == '__main__':
+    load_blockchain_data()
+    process_existing_files()
     create_genesis_block()
 
-if __name__ == '__main__':
-    app.run(host='서버아이피', port='원하는포트')  
+    observer = Observer()
+    observer.schedule(FileChangeHandler(), path=IMAGE_DIR, recursive=False)
+    observer.schedule(FileChangeHandler(), path=CSV_DIR, recursive=False)
+    Thread(target=observer.start).start()
+
+    app.run(host='0.0.0.0', port=5080, debug=True)
