@@ -112,5 +112,11 @@ python3 app.py
 
 ---
 
+
 ## 📧 문의
 -**이메일**: nos07054@naver.com ] 
+
+## 📧 참고링크들
+https://blog.naver.com/emmaeunji/221774107684
+https://velog.io/@jhin/%EC%9E%90%EC%B2%B4-%EB%A9%94%EC%9D%B8%EB%84%B7-%EA%B5%AC%EC%B6%95
+https://creal-news.tistory.com/category/%EB%B8%94%EB%A1%9D%EC%B2%B4%EC%9D%B8%20%EA%B3%B5%EB%B6%80
